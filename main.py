@@ -75,10 +75,11 @@ def extract_sri_data(response_obj):
         data = response_obj
 
     if not isinstance(data, dict):
-        return None, []
+        return None, [], None
 
     estado_sri = None
     mensajes_list = []
+    autorizacion_data = None
 
     # 1. Estructura estándar: autorizaciones -> autorizacion
     autorizaciones = data.get('autorizaciones')
@@ -90,6 +91,7 @@ def extract_sri_data(response_obj):
                 # Tomar la última/primera autorización
                 auth = auth_list[0]
                 estado_sri = auth.get('estado')
+                autorizacion_data = auth
                 
                 mensajes_data = auth.get('mensajes')
                 if mensajes_data and isinstance(mensajes_data, dict):
@@ -101,6 +103,7 @@ def extract_sri_data(response_obj):
         alt_resp = data.get('RespuestaAutorizacionComprobante') or data.get('EstadoAutorizacionComprobante') or data
         if isinstance(alt_resp, dict):
             estado_sri = alt_resp.get('estadoAutorizacion') or alt_resp.get('estadoConsulta') or alt_resp.get('estado')
+            autorizacion_data = alt_resp
             
             mensajes_data = alt_resp.get('mensajes')
             if mensajes_data and isinstance(mensajes_data, dict):
@@ -111,7 +114,7 @@ def extract_sri_data(response_obj):
     if isinstance(estado_sri, dict) and '$value' in estado_sri:
         estado_sri = estado_sri['$value']
 
-    return estado_sri, mensajes_list
+    return estado_sri, mensajes_list, autorizacion_data
 
 @app.post("/consultar-estado")
 def consultar_estado(request: ConsultaRequest):
@@ -129,7 +132,7 @@ def consultar_estado(request: ConsultaRequest):
             response = client.service.consultarEstadoAutorizacionComprobante(claveAcceso=request.claveAcceso)
         
         # Extraer datos de forma robusta
-        estado_sri, mensajes = extract_sri_data(response)
+        estado_sri, mensajes, autorizacion_data = extract_sri_data(response)
 
         mensaje_adicional = ""
         estado_final = ""
@@ -152,14 +155,42 @@ def consultar_estado(request: ConsultaRequest):
                 mensaje_adicional = info_adicional
 
         if not estado_sri:
-            return {"estado": "POR PROCESAR"}
+            return {
+                "claveAcceso": request.claveAcceso, 
+                "estado": "POR PROCESAR", 
+                "mensaje": "No se pudo determinar el estado del comprobante en la respuesta del SRI."
+            }
         
         if not estado_final:
             estado_final = mapear_estado(estado_sri)
             
-        response_payload = {"estado": estado_final}
+        response_payload = {
+            "claveAcceso": request.claveAcceso,
+            "estado": estado_final,
+            "estado_original": estado_sri,
+        }
+        
         if mensaje_adicional:
             response_payload["mensaje"] = mensaje_adicional
+            
+        if autorizacion_data:
+            if autorizacion_data.get('numeroAutorizacion'):
+                response_payload["numeroAutorizacion"] = autorizacion_data.get('numeroAutorizacion')
+            if autorizacion_data.get('fechaAutorizacion'):
+                # Convertir datetime a string si es necesario
+                fecha = autorizacion_data.get('fechaAutorizacion')
+                response_payload["fechaAutorizacion"] = str(fecha) if fecha else None
+            if autorizacion_data.get('ambiente'):
+                response_payload["ambiente"] = autorizacion_data.get('ambiente')
+            if autorizacion_data.get('comprobante'):
+                response_payload["comprobante"] = autorizacion_data.get('comprobante')
+                
+        # Incluir la respuesta cruda para depuración
+        try:
+            from zeep.helpers import serialize_object
+            response_payload["debug_sri_response"] = serialize_object(response)
+        except Exception:
+            response_payload["debug_sri_response"] = str(response)
             
         return response_payload
         

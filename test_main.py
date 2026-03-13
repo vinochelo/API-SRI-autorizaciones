@@ -49,7 +49,7 @@ class TestSRI:
         assert response.status_code == 200
         data = response.json()
         assert data["estado"] == "AUTORIZADO"
-        assert "estado_original" not in data
+        assert data["estado_original"] == "AUTORIZADO"
 
     def test_estado_no_autorizado_rechazada(self, mock_zeep_client):
         # Configurar el mock para devolver 'RECHAZADA'
@@ -63,7 +63,7 @@ class TestSRI:
         assert response.status_code == 200
         data = response.json()
         assert data["estado"] == "NO AUTORIZADO"
-        assert "estado_original" not in data
+        assert data["estado_original"] == "RECHAZADA"
 
     def test_estado_fuera_de_rango(self, mock_zeep_client):
         # Configurar el mock para devolver 'RECHAZADA' con identificador 99
@@ -81,7 +81,7 @@ class TestSRI:
         assert response.status_code == 200
         data = response.json()
         assert data["estado"] == "FUERA DE RANGO"
-        assert "estado_original" not in data
+        assert data["estado_original"] == "RECHAZADA"
         assert data["mensaje"] == "Fuera de rango"
 
     def test_estado_no_autorizado_devuelta(self, mock_zeep_client):

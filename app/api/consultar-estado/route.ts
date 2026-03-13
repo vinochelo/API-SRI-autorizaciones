@@ -41,16 +41,17 @@ function mapearEstado(estadoSri: string): string {
 }
 
 // Función para extraer datos de forma robusta de la respuesta del SRI
-function extractSriData(responseObj: any): { estadoSri: string | null, mensajesList: any[] } {
+function extractSriData(responseObj: any): { estadoSri: string | null, mensajesList: any[], autorizacionData: any } {
   if (!responseObj || typeof responseObj !== 'object') {
-    return { estadoSri: null, mensajesList: [] };
+    return { estadoSri: null, mensajesList: [], autorizacionData: null };
   }
 
   let estadoSri: string | null = null;
   let mensajesList: any[] = [];
+  let autorizacionData: any = null;
 
   // 1. Estructura estándar: autorizaciones -> autorizacion
-  const autorizaciones = responseObj.autorizaciones;
+  const autorizaciones = responseObj.autorizaciones || responseObj.RespuestaAutorizacionComprobante?.autorizaciones;
   if (autorizaciones && typeof autorizaciones === 'object') {
     const authData = autorizaciones.autorizacion;
     if (authData) {
@@ -58,6 +59,7 @@ function extractSriData(responseObj: any): { estadoSri: string | null, mensajesL
       if (authList.length > 0) {
         const auth = authList[0];
         estadoSri = auth.estado || null;
+        autorizacionData = auth;
 
         const mensajesData = auth.mensajes;
         if (mensajesData && typeof mensajesData === 'object') {
@@ -73,6 +75,7 @@ function extractSriData(responseObj: any): { estadoSri: string | null, mensajesL
     const altResp = responseObj.RespuestaAutorizacionComprobante || responseObj.EstadoAutorizacionComprobante || responseObj;
     if (altResp && typeof altResp === 'object') {
       estadoSri = altResp.estadoAutorizacion || altResp.estadoConsulta || altResp.estado || null;
+      autorizacionData = altResp;
 
       const mensajesData = altResp.mensajes;
       if (mensajesData && typeof mensajesData === 'object') {
@@ -87,7 +90,7 @@ function extractSriData(responseObj: any): { estadoSri: string | null, mensajesL
     estadoSri = (estadoSri as any).$value;
   }
 
-  return { estadoSri, mensajesList };
+  return { estadoSri, mensajesList, autorizacionData };
 }
 
 const corsHeaders = {
@@ -129,7 +132,7 @@ export async function POST(request: Request) {
     }
     
     // Extraer datos de forma robusta
-    const { estadoSri, mensajesList } = extractSriData(result);
+    const { estadoSri, mensajesList, autorizacionData } = extractSriData(result);
 
     let mensajeAdicional = "";
     let estadoFinal = "";
@@ -155,7 +158,10 @@ export async function POST(request: Request) {
 
     if (!estadoSri) {
       return NextResponse.json({
-        estado: "POR PROCESAR"
+        claveAcceso,
+        estado: "POR PROCESAR",
+        mensaje: "No se pudo determinar el estado del comprobante en la respuesta del SRI.",
+        debug_sri_response: result
       }, { headers: corsHeaders });
     }
 
@@ -164,10 +170,26 @@ export async function POST(request: Request) {
       estadoFinal = mapearEstado(estadoSri);
     }
 
-    const responsePayload: any = { estado: estadoFinal };
+    const responsePayload: any = { 
+      claveAcceso,
+      estado: estadoFinal,
+      estado_original: estadoSri,
+    };
+
     if (mensajeAdicional) {
       responsePayload.mensaje = mensajeAdicional;
     }
+
+    // Agregar toda la información detallada disponible
+    if (autorizacionData) {
+      if (autorizacionData.numeroAutorizacion) responsePayload.numeroAutorizacion = autorizacionData.numeroAutorizacion;
+      if (autorizacionData.fechaAutorizacion) responsePayload.fechaAutorizacion = autorizacionData.fechaAutorizacion;
+      if (autorizacionData.ambiente) responsePayload.ambiente = autorizacionData.ambiente;
+      if (autorizacionData.comprobante) responsePayload.comprobante = autorizacionData.comprobante;
+    }
+
+    // Incluir la respuesta cruda para depuración completa
+    responsePayload.debug_sri_response = result;
 
     return NextResponse.json(responsePayload, { headers: corsHeaders });
 
