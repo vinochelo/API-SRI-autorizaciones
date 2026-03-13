@@ -8,6 +8,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const [webhookLoading, setWebhookLoading] = useState(false);
+  const [webhookResult, setWebhookResult] = useState<any>(null);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -34,6 +37,29 @@ export default function Home() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTestWebhook = async () => {
+    setWebhookLoading(true);
+    setWebhookResult(null);
+
+    try {
+      const response = await fetch('/api/test-webhook', {
+        method: 'POST',
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Error al probar el Webhook');
+      }
+
+      setWebhookResult({ type: 'success', message: data.message });
+    } catch (err: any) {
+      setWebhookResult({ type: 'error', message: err.message });
+    } finally {
+      setWebhookLoading(false);
     }
   };
 
@@ -117,6 +143,31 @@ export default function Home() {
             </div>
           </div>
         )}
+
+        {/* Test Webhook Discord */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Prueba de Alertas (Discord)</h2>
+              <p className="text-slate-600 text-sm mt-1">
+                Verifica que la variable de entorno <code className="bg-slate-100 px-1 rounded">ALERT_WEBHOOK_URL</code> esté configurada correctamente en Vercel.
+              </p>
+            </div>
+            <button
+              onClick={handleTestWebhook}
+              disabled={webhookLoading}
+              className="bg-indigo-100 text-indigo-700 py-2 px-4 rounded-lg font-medium hover:bg-indigo-200 focus:ring-4 focus:ring-indigo-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm"
+            >
+              {webhookLoading ? 'Enviando...' : 'Enviar Alerta de Prueba'}
+            </button>
+          </div>
+          
+          {webhookResult && (
+            <div className={`p-4 rounded-xl text-sm ${webhookResult.type === 'success' ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+              <strong>{webhookResult.type === 'success' ? '¡Éxito!' : 'Error:'}</strong> {webhookResult.message}
+            </div>
+          )}
+        </div>
 
         {/* Instrucciones de Integración */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
