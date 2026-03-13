@@ -5,6 +5,8 @@ from zeep import Client
 from zeep.exceptions import Fault
 import os
 import requests
+from datetime import datetime
+import uuid
 
 app = FastAPI(
     title="API SRI Ecuador - Consulta de Comprobantes",
@@ -23,6 +25,9 @@ app.add_middleware(
 
 # Endpoint del SRI (Solo Producción)
 SRI_URL_PRODUCCION = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/ConsultaComprobante?wsdl"
+
+# Historial en memoria para el monitor (limitado a 50 peticiones)
+request_logs = []
 
 class ConsultaRequest(BaseModel):
     claveAcceso: str = Field(..., min_length=49, max_length=49, description="Clave de acceso de 49 dígitos")
@@ -120,6 +125,16 @@ def extract_sri_data(response_obj):
 def consultar_estado(request: ConsultaRequest):
     wsdl = SRI_URL_PRODUCCION
     
+    # Crear registro inicial
+    log_entry = {
+        "id": str(uuid.uuid4())[:8],
+        "fecha": datetime.now().isoformat(),
+        "clave": request.claveAcceso,
+        "exito": False,
+        "estadoSri": "ERROR",
+        "mensaje": ""
+    }
+    
     try:
         # Inicializar cliente SOAP
         client = Client(wsdl)
@@ -155,6 +170,10 @@ def consultar_estado(request: ConsultaRequest):
                 mensaje_adicional = info_adicional
 
         if not estado_sri:
+            log_entry["estadoSri"] = "POR PROCESAR"
+            log_entry["mensaje"] = "No se pudo determinar el estado del comprobante en la respuesta del SRI."
+            log_entry["exito"] = True
+            _guardar_log(log_entry)
             return {
                 "claveAcceso": request.claveAcceso, 
                 "estado": "POR PROCESAR", 
@@ -170,8 +189,14 @@ def consultar_estado(request: ConsultaRequest):
             "estado_original": estado_sri,
         }
         
+        log_entry["estadoSri"] = estado_final
+        log_entry["exito"] = True
+        
         if mensaje_adicional:
             response_payload["mensaje"] = mensaje_adicional
+            log_entry["mensaje"] = mensaje_adicional
+        else:
+            log_entry["mensaje"] = "Consulta exitosa"
             
         if autorizacion_data:
             if autorizacion_data.get('numeroAutorizacion'):
@@ -192,16 +217,33 @@ def consultar_estado(request: ConsultaRequest):
         except Exception:
             response_payload["debug_sri_response"] = str(response)
             
+        _guardar_log(log_entry)
         return response_payload
         
     except Fault as f:
         error_msg = f"Error del servicio SOAP del SRI: {f.message}"
+        log_entry["mensaje"] = error_msg
+        _guardar_log(log_entry)
         enviar_alerta(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         error_msg = f"Error de conexión o cambio en el endpoint del SRI: {str(e)}"
+        log_entry["mensaje"] = error_msg
+        _guardar_log(log_entry)
         enviar_alerta(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
+
+def _guardar_log(log_entry):
+    """Guarda el log en memoria, manteniendo solo los últimos 50."""
+    global request_logs
+    request_logs.insert(0, log_entry)
+    if len(request_logs) > 50:
+        request_logs.pop()
+
+@app.get("/logs")
+def get_logs():
+    """Devuelve el historial de peticiones recientes."""
+    return {"logs": request_logs}
 
 if __name__ == "__main__":
     import uvicorn

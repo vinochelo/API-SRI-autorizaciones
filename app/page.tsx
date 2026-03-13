@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface PeticionLog {
   id: string;
-  fecha: Date;
+  fecha: string;
   clave: string;
   exito: boolean;
   estadoSri?: string;
@@ -21,6 +21,26 @@ export default function Home() {
   const [webhookResult, setWebhookResult] = useState<any>(null);
   
   const [historial, setHistorial] = useState<PeticionLog[]>([]);
+
+  // Función para obtener logs del backend
+  const fetchLogs = async () => {
+    try {
+      const response = await fetch('/api/logs');
+      if (response.ok) {
+        const data = await response.json();
+        setHistorial(data.logs || []);
+      }
+    } catch (error) {
+      console.error("Error al obtener logs:", error);
+    }
+  };
+
+  // Polling cada 5 segundos
+  useEffect(() => {
+    fetchLogs(); // Carga inicial
+    const interval = setInterval(fetchLogs, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,27 +65,14 @@ export default function Home() {
 
       setResultado(data);
       
-      // Agregar al historial (éxito)
-      setHistorial(prev => [{
-        id: Math.random().toString(36).substring(7),
-        fecha: new Date(),
-        clave: claveAcceso,
-        exito: true,
-        estadoSri: data.estado,
-        mensaje: data.mensaje || 'Consulta exitosa'
-      }, ...prev]);
+      // Refrescar logs inmediatamente después de una consulta local
+      fetchLogs();
 
     } catch (err: any) {
       setError(err.message);
       
-      // Agregar al historial (error)
-      setHistorial(prev => [{
-        id: Math.random().toString(36).substring(7),
-        fecha: new Date(),
-        clave: claveAcceso,
-        exito: false,
-        mensaje: err.message
-      }, ...prev]);
+      // Refrescar logs inmediatamente después de un error local
+      fetchLogs();
     } finally {
       setLoading(false);
     }
@@ -135,7 +142,7 @@ export default function Home() {
                   historial.map((log) => (
                     <tr key={log.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors">
                       <td className="px-4 py-3 whitespace-nowrap text-xs font-medium text-slate-900">
-                        {log.fecha.toLocaleTimeString()}
+                        {new Date(log.fecha).toLocaleTimeString()}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs">
                         {log.clave.substring(0, 8)}...{log.clave.substring(41)}
