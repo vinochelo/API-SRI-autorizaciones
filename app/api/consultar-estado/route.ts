@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import * as soap from 'soap';
+import { addLog } from '@/lib/logger';
 
 // URL del WSDL del SRI (Solo Producción según solicitud)
 const SRI_URL_PRODUCCION = "https://cel.sri.gob.ec/comprobantes-electronicos-ws/ConsultaComprobante?wsdl";
@@ -108,8 +109,20 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { claveAcceso } = body;
 
+    // Crear registro inicial para el log
+    const logEntry = {
+      id: Math.random().toString(36).substring(7),
+      fecha: new Date().toISOString(),
+      clave: claveAcceso || 'SIN_CLAVE',
+      exito: false,
+      estadoSri: 'ERROR',
+      mensaje: ''
+    };
+
     // Validación básica de la clave de acceso
     if (!claveAcceso || claveAcceso.length !== 49) {
+      logEntry.mensaje = "La clave de acceso debe tener exactamente 49 dígitos.";
+      addLog(logEntry);
       return NextResponse.json(
         { error: "La clave de acceso debe tener exactamente 49 dígitos." },
         { status: 400, headers: corsHeaders }
@@ -157,6 +170,11 @@ export async function POST(request: Request) {
     }
 
     if (!estadoSri) {
+      logEntry.estadoSri = "POR PROCESAR";
+      logEntry.mensaje = "No se pudo determinar el estado del comprobante en la respuesta del SRI.";
+      logEntry.exito = true;
+      addLog(logEntry);
+      
       return NextResponse.json({
         claveAcceso,
         estado: "POR PROCESAR",
@@ -176,8 +194,14 @@ export async function POST(request: Request) {
       estado_original: estadoSri,
     };
 
+    logEntry.estadoSri = estadoFinal;
+    logEntry.exito = true;
+
     if (mensajeAdicional) {
       responsePayload.mensaje = mensajeAdicional;
+      logEntry.mensaje = mensajeAdicional;
+    } else {
+      logEntry.mensaje = "Consulta exitosa";
     }
 
     // Agregar toda la información detallada disponible
@@ -191,11 +215,22 @@ export async function POST(request: Request) {
     // Incluir la respuesta cruda para depuración completa
     responsePayload.debug_sri_response = result;
 
+    addLog(logEntry);
     return NextResponse.json(responsePayload, { headers: corsHeaders });
 
   } catch (error: any) {
     const errorMsg = error.message || "Error interno del servidor al comunicarse con el SRI.";
     console.error("Error al consultar el SRI:", error);
+    
+    // Loguear el error de forma genérica
+    addLog({
+      id: Math.random().toString(36).substring(7),
+      fecha: new Date().toISOString(),
+      clave: 'ERROR_DESCONOCIDO',
+      exito: false,
+      estadoSri: 'ERROR',
+      mensaje: errorMsg
+    });
     
     // Enviar alerta al webhook
     await enviarAlerta(`Error de conexión o cambio en el endpoint del SRI: ${errorMsg}`);
