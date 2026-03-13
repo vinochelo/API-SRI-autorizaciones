@@ -1,0 +1,5 @@
+{
+  "name": "API SRI Ecuador",
+  "description": "API en Python (FastAPI) para consultar el estado de comprobantes electrónicos en el SRI de Ecuador.",
+  "requestFramePermissions": []
+}
